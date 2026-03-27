@@ -3,8 +3,6 @@ const lib = @import("lib.zig");
 
 const openssl = lib.openssl;
 
-const posix = std.posix;
-
 const Io = std.Io;
 const Conn = lib.Conn;
 const Allocator = std.mem.Allocator;
@@ -19,7 +17,7 @@ pub const Stream = if (lib.has_openssl) TLSStream else PlainStream;
 const TLSStream = struct {
     valid: bool,
     ssl: ?*openssl.SSL,
-    socket: posix.socket_t,
+    socket: std.posix.socket_t,
     io: Io,
 
     pub fn connect(allocator: Allocator, io: Io, opts: Conn.Opts, ctx_: ?*openssl.SSL_CTX) !Stream {
@@ -102,7 +100,7 @@ const TLSStream = struct {
             }
             openssl.SSL_free(ssl);
         }
-        posix.close(self.socket);
+        closeSocket(self.socket, self.io);
     }
 
     pub fn writeAll(self: *Stream, data: []const u8) !void {
@@ -133,7 +131,7 @@ const TLSStream = struct {
 };
 
 const PlainStream = struct {
-    socket: posix.socket_t,
+    socket: std.posix.socket_t,
     io: Io,
 
     pub fn connect(_: Allocator, io: Io, opts: Conn.Opts, _: anytype) !PlainStream {
@@ -152,7 +150,7 @@ const PlainStream = struct {
             const handle = (try hostname.connect(io, port, .{ .mode = .stream })).socket.handle;
             break :blk handle;
         };
-        errdefer posix.close(socket);
+        errdefer closeSocket(socket, io);
 
         return .{
             .socket = socket,
@@ -161,7 +159,7 @@ const PlainStream = struct {
     }
 
     pub fn close(self: *const PlainStream) void {
-        posix.close(self.socket);
+        closeSocket(self.socket, self.io);
     }
 
     pub fn writeAll(self: *const PlainStream, data: []const u8) !void {
@@ -173,7 +171,12 @@ const PlainStream = struct {
     }
 };
 
-fn readSocket(socket: posix.socket_t, io: Io, buf: []u8) !usize {
+fn closeSocket(socket: std.posix.socket_t, io: Io) void {
+    const s: Io.net.Stream = .{ .socket = .{ .handle = socket, .address = undefined } };
+    s.close(io);
+}
+
+fn readSocket(socket: std.posix.socket_t, io: Io, buf: []u8) !usize {
     const stream: Io.net.Stream = .{ .socket = .{ .handle = socket, .address = undefined } };
     var vecs: [1][]u8 = .{buf};
     var reader = stream.reader(io, &.{});
@@ -181,7 +184,7 @@ fn readSocket(socket: posix.socket_t, io: Io, buf: []u8) !usize {
     return try r.readVec(&vecs);
 }
 
-fn writeSocket(socket: posix.socket_t, io: Io, data: []const u8) !void {
+fn writeSocket(socket: std.posix.socket_t, io: Io, data: []const u8) !void {
     const stream: Io.net.Stream = .{ .socket = .{ .handle = socket, .address = undefined } };
     var buf: [1024]u8 = undefined;
     var writer = stream.writer(io, &buf);
